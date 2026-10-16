@@ -15,3 +15,34 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           # A fixed release, so this build only changes when you change it.
           villagesql-version: "0.0.7"
+
+  # Runs the README's install-script steps as written, against the server the
+  # install script sets up, so a README step that stops working fails here.
+  readme-install-script:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - name: Install VillageSQL with the install script
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends cmake g++ make libaio1t64 libnuma1
+          # An empty install ID opts this run out of install telemetry.
+          mkdir -p ~/.villagesql && : > ~/.villagesql/.install_id
+          curl -fsSL https://install.villagesql.com | VSQL_CODEBASE=mysql-8.4 INSTALL_METHOD=prebuilt bash
+      - name: Build and install as the README says
+        run: |
+          mkdir build
+          cd build
+          cmake .. -DVillageSQL_BUILD_DIR="$HOME/.villagesql/prebuilt" \
+            -DVillageSQL_VEB_INSTALL_DIR="$HOME/.villagesql/prebuilt/lib/veb"
+          make -j $(getconf _NPROCESSORS_ONLN)
+          make install
+      - name: Load the extension
+        run: |
+          export MYSQL_PWD=$(awk -F': *' '/^Root Password:/ {print $2}' ~/.villagesql/credentials.txt)
+          OUT=$(~/.villagesql/prebuilt/bin/mysql -u root -N --socket="$HOME/.villagesql/mysql.sock" \
+            -e "INSTALL EXTENSION vsql_extension_template; SELECT hello_world();")
+          echo "$OUT"
+          [ "$OUT" = "Hello, World!" ]
